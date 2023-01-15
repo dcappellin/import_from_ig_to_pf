@@ -1,5 +1,8 @@
 import json
 import os.path
+import time
+from pathlib import Path
+
 import click
 
 from pixelfed_instance import PixelfedInstance
@@ -10,20 +13,26 @@ IG_POSTS_FILE_PATH = os.path.join('content', 'posts_1.json')
 IG_POSTS_MEDIA_PATH = os.path.join('media', 'posts')
 
 
-def add_image_to_pixelfed(media_path, dry_run):
-    if dry_run:
-        return None
+def add_image_to_pixelfed(media_path, dry_run, verbose):
+    print(f'Posting media {media_path}...')
+    media_id = None
+    if not dry_run:
+        resp = Pixelfed().media(media_path)
+        if verbose:
+            print(json.dumps(resp, indent=4))
+        media_id = resp['id']
+    print('...done.')
 
-    resp = Pixelfed().media(media_path)
-    print(resp)
-    return resp['id']
+    return media_id
 
 
-def create_post_with_uploaded_media(status, added_media_ids, visibility, dry_run):
-    if dry_run:
-        return None
-
-    Pixelfed().statuses(status=status, media_ids=added_media_ids, visibility=visibility)
+def create_status_with_uploaded_media(status, added_media_ids, visibility, dry_run, verbose):
+    print('Posting status...')
+    if not dry_run:
+        resp = Pixelfed().statuses(status=status, media_ids=added_media_ids, visibility=visibility)
+        if verbose:
+            print(json.dumps(resp, indent=4))
+    print('...done.')
 
 
 @click.command()
@@ -33,11 +42,14 @@ def create_post_with_uploaded_media(status, added_media_ids, visibility, dry_run
               required=True,
               default='unlisted',
               show_default=True)
-@click.option('--custom_tag', help="Add a custom hashtag at the end of"
-                                   "every imported post caption.")
+@click.option('--custom-hashtag', help="Add a custom hashtag at the end of"
+                                       "every imported post caption.")
 @click.option('--dry-run', is_flag=True)
 @click.option('--verbose', is_flag=True)
-def import_to_pixelfed(ig_exported_path, dry_run, custom_tag, visibility, verbose):
+def import_to_pixelfed(ig_exported_path, dry_run, custom_hashtag, visibility, verbose):
+    if dry_run:
+        print('dry-run is enable. Nothing will be posted to Pixelfed.')
+
     pfi = PixelfedInstance()
 
     if not is_ig_folder_valid(ig_exported_path):
@@ -50,30 +62,36 @@ def import_to_pixelfed(ig_exported_path, dry_run, custom_tag, visibility, verbos
 
     for post in posts:
         added_media_ids = []
-        for media in post['media']:
-            media_path = os.path.join(ig_exported_path, media['uri'])
-            if os.path.isfile(media_path):
-                print('> Image exists') if verbose else ''
-                added_media_ids.append(add_image_to_pixelfed(media_path, dry_run))
 
         # TODO create more posts if medias are more than server limit
-        if len(added_media_ids) > pfi.get_max_media_attachments:
-            print(f'Skipped. {len(added_media_ids)} medias, but server supports only '
-                  f'{pfi.get_max_media_attachments} per status.')
+        if len(post['media']) > pfi.get_max_media_attachments:
+            print(f"Skipped. {len(post['media'])} medias, but server supports only "
+                  f"'{pfi.get_max_media_attachments} per status.")
             continue
 
         if len(post['media']) == 1:
-            status_title = f'{media["title"]} {custom_tag}' if custom_tag else media["title"]
+            status_title = f'{post["media"][0]["title"]} #{custom_hashtag}' if custom_hashtag else post[
+                "media"][0]["title"]
         else:
-            status_title = f'{post["title"]} {custom_tag}' if custom_tag else post["title"]
+            status_title = f'{post["title"]} #{custom_hashtag}' if custom_hashtag else post["title"]
+        if verbose:
+            print(f"> Status({len(status_title)} chars): {status_title}")
 
         # TODO find a way to publish long post
         if len(status_title) > pfi.get_max_characters:
             print(f'Skipped. Status caption is {len(status_title)} chars, but server supports '
                   f'only {pfi.get_max_characters} chars per status.')
 
-        resp = create_post_with_uploaded_media(status_title, added_media_ids, visibility, dry_run)
-        print(resp)
+        for media in post['media']:
+            media_path = os.path.join(ig_exported_path, media['uri'])
+            if os.path.isfile(media_path) and Path(media_path).suffix.lower() == '.jpg':
+                print('> Image exists') if verbose else ''
+                added_media_ids.append(add_image_to_pixelfed(media_path, dry_run, verbose))
+                time.sleep(1)
+
+        if len(added_media_ids) >= 1:
+            create_status_with_uploaded_media(status_title, added_media_ids, visibility, dry_run, verbose)
+            time.sleep(1)
 
     print("Import completed.")
 
