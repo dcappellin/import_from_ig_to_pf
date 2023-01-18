@@ -1,4 +1,5 @@
 import json
+import math
 import os.path
 import time
 from pathlib import Path
@@ -61,37 +62,50 @@ def import_to_pixelfed(ig_exported_path, dry_run, custom_hashtag, visibility, ve
     print(f"Found {len(posts)} posts to import.")
 
     for post in posts:
-        added_media_ids = []
 
         # TODO create more posts if medias are more than server limit
-        if len(post['media']) > pfi.get_max_media_attachments:
-            print(f"Skipped. {len(post['media'])} medias, but server supports only "
-                  f"'{pfi.get_max_media_attachments} per status.")
-            continue
+        # if len(post['media']) > pfi.get_max_media_attachments:
+        #     print(f"Skipped. {len(post['media'])} medias, but server supports only "
+        #           f"{pfi.get_max_media_attachments} per status.")
+        #     continue
 
-        if len(post['media']) == 1:
-            status_title = f'{post["media"][0]["title"]} #{custom_hashtag}' if custom_hashtag else post[
-                "media"][0]["title"]
-        else:
-            status_title = f'{post["title"]} #{custom_hashtag}' if custom_hashtag else post["title"]
-        if verbose:
-            print(f"> Status({len(status_title)} chars): {status_title}")
+        parts = math.ceil(len(post['media']) / pfi.get_max_media_attachments)
+        for part in range(parts):
+            if parts > 1:
+                status_title = f'{part + 1}/{parts} '
 
-        # TODO find a way to publish long post
-        if len(status_title) > pfi.get_max_characters:
-            print(f'Skipped. Status caption is {len(status_title)} chars, but server supports '
-                  f'only {pfi.get_max_characters} chars per status.')
+            if len(post['media']) == 1:
+                status_title += f'{post["media"][0]["title"]} #{custom_hashtag}' if \
+                    custom_hashtag else post["media"][0]["title"]
+            else:
+                status_title += f'{post["title"]} #{custom_hashtag}' if custom_hashtag else post[
+                    "title"]
+            if verbose:
+                print(f"> Status({len(status_title)} chars): {status_title}")
 
-        for media in post['media']:
-            media_path = os.path.join(ig_exported_path, media['uri'])
-            if os.path.isfile(media_path) and Path(media_path).suffix.lower() == '.jpg':
-                print('> Image exists') if verbose else ''
-                added_media_ids.append(add_image_to_pixelfed(media_path, dry_run, verbose))
+            # TODO find a way to publish long post
+            if len(status_title) > pfi.get_max_characters:
+                print(f'Skipped. Status caption is {len(status_title)} chars, but server supports '
+                      f'only {pfi.get_max_characters} chars per status.')
+                continue
+
+            start = part * pfi.get_max_media_attachments
+            stop = min((part + 1) * pfi.get_max_media_attachments, len(post['media']))
+
+            added_media_ids = []
+            for media_index in range(start, stop):
+                if verbose:
+                    print(f"> Media n.{media_index}")
+                media = post['media'][media_index]
+                media_path = os.path.join(ig_exported_path, media['uri'])
+                if os.path.isfile(media_path) and Path(media_path).suffix.lower() == '.jpg':
+                    print('> Image exists') if verbose else ''
+                    added_media_ids.append(add_image_to_pixelfed(media_path, dry_run, verbose))
+                    time.sleep(1)
+
+            if len(added_media_ids) >= 1:
+                create_status_with_uploaded_media(status_title, added_media_ids, visibility, dry_run, verbose)
                 time.sleep(1)
-
-        if len(added_media_ids) >= 1:
-            create_status_with_uploaded_media(status_title, added_media_ids, visibility, dry_run, verbose)
-            time.sleep(1)
 
     print("Import completed.")
 
