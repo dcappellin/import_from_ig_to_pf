@@ -1,6 +1,7 @@
 import json
 import math
 import os.path
+import textwrap
 import time
 from pathlib import Path
 
@@ -63,27 +64,23 @@ def import_to_pixelfed(ig_exported_path, dry_run, custom_hashtag, visibility, ve
 
     for post in posts:
 
-        # TODO create more posts if medias are more than server limit
-        # if len(post['media']) > pfi.get_max_media_attachments:
-        #     print(f"Skipped. {len(post['media'])} medias, but server supports only "
-        #           f"{pfi.get_max_media_attachments} per status.")
-        #     continue
-
         parts = math.ceil(len(post['media']) / pfi.get_max_media_attachments)
         for part in range(parts):
+            status_title = ''
             if parts > 1:
                 status_title = f'{part + 1}/{parts} '
 
+            status_max_characters = pfi.get_max_characters - (len(custom_hashtag) if custom_hashtag else 0) - len(status_title) - 2
             if len(post['media']) == 1:
-                status_title += f'{post["media"][0]["title"]} #{custom_hashtag}' if \
-                    custom_hashtag else post["media"][0]["title"]
+                status_title += textwrap.shorten(f'{post["media"][0]["title"]}',
+                                                 status_max_characters)
             else:
-                status_title += f'{post["title"]} #{custom_hashtag}' if custom_hashtag else post[
-                    "title"]
+                status_title += textwrap.shorten(f'{post["title"]}', status_max_characters)
+            if custom_hashtag:
+                status_title += f' #{custom_hashtag}'
             if verbose:
                 print(f"> Status({len(status_title)} chars): {status_title}")
 
-            # TODO find a way to publish long post
             if len(status_title) > pfi.get_max_characters:
                 print(f'Skipped. Status caption is {len(status_title)} chars, but server supports '
                       f'only {pfi.get_max_characters} chars per status.')
